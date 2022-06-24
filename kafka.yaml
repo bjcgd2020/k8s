@@ -1,18 +1,62 @@
-apiVersion: apps/v1beta1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-svc
+  namespace: kafka
+  labels:
+    app: kafka
+spec:
+  ports:
+  - port: 9092
+    name: server
+  clusterIP: None
+  selector:
+    app: kafka
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka-pdb
+  namespace: kafka
+spec:
+  selector:
+    matchLabels:
+      app: kafka
+  minAvailable: 2
+---
+apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: kafka
+  namespace: kafka
 spec:
-  serviceName: kafka-hs
+  selector:
+     matchLabels:
+        app: kafka
+  serviceName: kafka-svc
   replicas: 3
-  podManagementPolicy: Parallel
-  updateStrategy:
-    type: RollingUpdate
   template:
     metadata:
       labels:
         app: kafka
     spec:
+      nodeSelector:
+          travis.io/schedule-only: "kafka"
+      tolerations:
+      - key: "travis.io/schedule-only"
+        operator: "Equal"
+        value: "kafka"
+        effect: "NoSchedule"
+      - key: "travis.io/schedule-only"
+        operator: "Equal"
+        value: "kafka"
+        effect: "NoExecute"
+        tolerationSeconds: 3600
+      - key: "travis.io/schedule-only"
+        operator: "Equal"
+        value: "kafka"
+        effect: "PreferNoSchedule"
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -20,7 +64,7 @@ spec:
                 matchExpressions:
                   - key: "app"
                     operator: In
-                    values:
+                    values: 
                     - kafka
               topologyKey: "kubernetes.io/hostname"
         podAffinity:
@@ -31,27 +75,27 @@ spec:
                     matchExpressions:
                       - key: "app"
                         operator: In
-                        values:
+                        values: 
                         - zk
                  topologyKey: "kubernetes.io/hostname"
       terminationGracePeriodSeconds: 300
       containers:
-      - name: k8skafka
+      - name: k8s-kafka
         imagePullPolicy: Always
-        image: gcr.io/google_containers/kubernetes-kafka:1.0-10.2.1
-        #resources:
-        #  requests:
-        #    memory: "1Gi"
-        #    cpu: "0.5"
+        image: fastop/kafka:2.2.0
+        resources:
+          requests:
+            memory: "600Mi"
+            cpu: 500m
         ports:
-        - containerPort: 9093
+        - containerPort: 9092
           name: server
         command:
         - sh
         - -c
         - "exec kafka-server-start.sh /opt/kafka/config/server.properties --override broker.id=${HOSTNAME##*-} \
-          --override listeners=PLAINTEXT://:9093 \
-          --override zookeeper.connect=zk-cs-0.default.svc.cluster.local:2181,zk-cs-1.default.svc.cluster.local:2181,zk-cs-2.default.svc.cluster.local:2181 \
+          --override listeners=PLAINTEXT://:9092 \
+          --override zookeeper.connect=zk-0.zk-hs.kafka.svc.cluster.local:2181,zk-1.zk-hs.kafka.svc.cluster.local:2181,zk-2.zk-hs.kafka.svc.cluster.local:2181 \
           --override log.dir=/var/lib/kafka \
           --override auto.create.topics.enable=true \
           --override auto.leader.rebalance.enable=true \
@@ -111,7 +155,7 @@ spec:
           --override fetch.purgatory.purge.interval.requests=1000 \
           --override group.max.session.timeout.ms=300000 \
           --override group.min.session.timeout.ms=6000 \
-          --override inter.broker.protocol.version=0.10.2-IV0 \
+          --override inter.broker.protocol.version=2.2.0 \
           --override log.cleaner.backoff.ms=15000 \
           --override log.cleaner.dedupe.buffer.size=134217728 \
           --override log.cleaner.delete.retention.ms=86400000 \
@@ -130,7 +174,7 @@ spec:
           --override log.preallocate=false \
           --override log.retention.check.interval.ms=300000 \
           --override max.connections.per.ip=2147483647 \
-          --override num.partitions=1 \
+          --override num.partitions=4 \
           --override producer.purgatory.purge.interval.requests=1000 \
           --override replica.fetch.backoff.ms=1000 \
           --override replica.fetch.max.bytes=1048576 \
@@ -145,21 +189,23 @@ spec:
         - name: datadir
           mountPath: /var/lib/kafka
         readinessProbe:
-          exec:
-           command:
-            - sh
-            - -c
-            - "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server=localhost:9093"
+          tcpSocket:
+            port: 9092
+          timeoutSeconds: 1
+          initialDelaySeconds: 5
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
   volumeClaimTemplates:
   - metadata:
       name: datadir
-      annotations:
-        volume.beta.kubernetes.io/storage-class: "fast"
+      #This annotation is still working, however it will become fully deprecated in a future Kubernetes release.just use storageClassName.
+      #  annotations:
+      #      volume.beta.kubernetes.io/storage-class: nfs-storage
+      #      volume.beta.kubernetes.io/storage-provisioner: fuseim.pri/ifs
     spec:
-      accessModes: [ "ReadWriteOnce" ]
+      accessModes: [ "ReadWriteMany" ]
+      storageClassName: nfs-storage 
       resources:
         requests:
-          storage: 10Gi
+          storage:  300Mi

@@ -1,1 +1,1 @@
-FROM k8s.gcr.io/node-problem-detector/node-problem-detector:v0.8.11
+FROM registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.3.0
